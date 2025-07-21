@@ -76,13 +76,16 @@ jobs:
             echo "color=ff0000" >> $GITHUB_ENV
           fi
 
-      - name: Send Teams Notification
-        uses: haroldelopez/ms-teams-notification-action@v1.1.0
+      - name: Send Email Report
+        uses: dawidd6/action-send-mail@v3
         with:
-          webhook_url: ${{ secrets.MS_TEAMS_WEBHOOK_URL }}
-          notification_type: 'custom'
-          title: 'Security & Deployment Status'
-          message: 'Scans and deployment completed for ${{ github.repository }} on ${{ github.ref_name }}.'
-          status: ${{ env.status }}
-          theme_color: ${{ env.color }}
-          url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.EMAIL_USER }}
+          password: ${{ secrets.EMAIL_PASS }}
+          subject: Security Scan Report - GitHub Actions
+          to: ${{ secrets.EMAIL_TO }}
+          from: GitHub CI Pipeline
+          body: |
+            Security Scan Results attached.
+          attachments: snyk_report.json
