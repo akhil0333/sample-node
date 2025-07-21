@@ -1,0 +1,88 @@
+name: Security & Deployment Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  build-docker:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.tag.outputs.image }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set image tag
+        id: tag
+        run: echo "image=node-app:${{ github.sha }}" >> $GITHUB_ENV && echo "::set-output name=image::node-app:${{ github.sha }}"
+
+      - name: Build Docker image
+        run: docker build -t node-app:${{ github.sha }} .
+
+  snyk-scan:
+    name: Snyk Docker Scan
+    runs-on: ubuntu-latest
+    needs: build-docker
+
+    steps:
+      - name: Run Snyk scan on Docker image
+        uses: snyk/actions/docker@v2
+        with:
+          image: node-app:${{ github.sha }}
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+  rapid7-scan:
+    name: Rapid7 DAST Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger Rapid7 InsightAppSec Scan
+        uses: rapid7/insightappsec-scan-github-actions@v1.3.6
+        with:
+          region: "us"
+          api-key: ${{ secrets.INSIGHTAPPSEC_API_KEY }}
+          scan-config-id: "your-scan-config-id"
+          vuln-query: "vulnerability.severity = 'HIGH'"
+          wait-for-scan-complete: true
+
+  deploy:
+    name: Deploy Container
+    runs-on: ubuntu-latest
+    needs: [snyk-scan, rapid7-scan]
+
+    steps:
+      - name: Run Docker Compose Up
+        run: |
+          docker-compose up -d --build
+
+  notify:
+    name: Notify on Microsoft Teams
+    runs-on: ubuntu-latest
+    needs: [snyk-scan, rapid7-scan, deploy]
+
+    steps:
+      - name: Determine result
+        run: |
+          if [[ "${{ needs.snyk-scan.result }}" == "success" && "${{ needs.rapid7-scan.result }}" == "success" && "${{ needs.deploy.result }}" == "success" ]]; then
+            echo "status=✅ Passed" >> $GITHUB_ENV
+            echo "color=00cc00" >> $GITHUB_ENV
+          else
+            echo "status=❌ Failed" >> $GITHUB_ENV
+            echo "color=ff0000" >> $GITHUB_ENV
+          fi
+
+      - name: Send Teams Notification
+        uses: haroldelopez/ms-teams-notification-action@v1.1.0
+        with:
+          webhook_url: ${{ secrets.MS_TEAMS_WEBHOOK_URL }}
+          notification_type: 'custom'
+          title: 'Security & Deployment Status'
+          message: 'Scans and deployment completed for `${{ github.repository }}` on `${{ github.ref_name }}`.'
+          status: ${{ env.status }}
+          theme_color: ${{ env.color }}
+          url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
