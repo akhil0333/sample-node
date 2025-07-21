@@ -1,4 +1,4 @@
-name: Security & Deployment Pipeline
+name: Security & Deployment Pipeline 
 
 on:
   push:
